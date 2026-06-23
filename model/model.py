@@ -1,6 +1,6 @@
-# src/Model/model.py
+# Model/model.py
 # Hybrid Movie Recommendation System — core engine
-# Imported by src/streamlit_app.py via: from Model.model import load_model, hybrid_recommend
+# Loaded by streamlit_app.py (root) via: from Model.model import load_model, hybrid_recommend
 
 from __future__ import annotations
 
@@ -19,25 +19,24 @@ from scipy.sparse import load_npz
 # ---------------------------------------------------------------------------
 # Artifact paths
 # ---------------------------------------------------------------------------
-# __file__  →  src/Model/model.py
-# BASE_DIR  →  src/Model/
-# All three artifacts live alongside model.py, so paths are always correct
-# whether this module is run directly or imported from src/streamlit_app.py.
+# __file__ resolves to Model/model.py regardless of the caller's location.
+# BASE_DIR is always Model/, so all three artifact paths are always correct
+# whether this module is run directly or imported from the project root.
 # ---------------------------------------------------------------------------
-BASE_DIR                = Path(__file__).resolve().parent           # → .../src/Model/
-MODEL_PATH              = BASE_DIR / "hybrid_recommender_model.pkl" # → .../src/Model/hybrid_recommender_model.pkl
-CONTENT_SIMILARITY_PATH = BASE_DIR / "content_similarity.npz"      # → .../src/Model/content_similarity.npz
-COLLAB_SIMILARITY_PATH  = BASE_DIR / "collab_similarity.npz"       # → .../src/Model/collab_similarity.npz
+BASE_DIR = Path(__file__).resolve().parent                          # → .../Model/
+MODEL_PATH = BASE_DIR / "hybrid_recommender_model.pkl"              # → .../Model/hybrid_recommender_model.pkl
+CONTENT_SIMILARITY_PATH = BASE_DIR / "content_similarity.npz"      # → .../Model/content_similarity.npz
+COLLAB_SIMILARITY_PATH = BASE_DIR / "collab_similarity.npz"        # → .../Model/collab_similarity.npz
 
 # ---------------------------------------------------------------------------
 # Tuning constants
 # ---------------------------------------------------------------------------
-# STORED_CONTENT_NEIGHBORS must not exceed the TOP_K value used when
-# content_similarity.npz was built (currently capped at 100).
-STORED_CONTENT_NEIGHBORS  = 100
+# STORED_CONTENT_NEIGHBORS must not exceed the TOP_K value used when the
+# content_similarity.npz matrix was built (currently capped at 100).
+STORED_CONTENT_NEIGHBORS = 100
 DEFAULT_CONTENT_CANDIDATES = STORED_CONTENT_NEIGHBORS
-DEFAULT_COLLAB_CANDIDATES  = 180
-FUZZY_MATCH_THRESHOLD      = 68
+DEFAULT_COLLAB_CANDIDATES = 180
+FUZZY_MATCH_THRESHOLD = 68
 
 # ---------------------------------------------------------------------------
 # Module-level state (populated by load_model)
@@ -49,11 +48,11 @@ user2idx: dict
 title2idx: dict
 idx2title: dict
 similarity_content = None
-similarity_collab  = None
+similarity_collab = None
 
-_title_to_content_idx: dict[str, int]  = {}
-_title_lookup:          dict[str, str]  = {}   # clean_title → original_title
-_movie_meta:            dict[str, dict] = {}
+_title_to_content_idx: dict[str, int] = {}
+_title_lookup: dict[str, str] = {}      # clean_title → original_title
+_movie_meta: dict[str, dict] = {}
 _loaded = False
 
 
@@ -69,7 +68,7 @@ def _load_pickle(path: Path) -> dict:
 
 def load_model(force: bool = False) -> bool:
     """
-    Load all recommender artifacts from src/Model/.
+    Load all recommender artifacts from Model/.
 
     Called once on startup by streamlit_app.py (via st.cache_resource).
     Safe to call multiple times — skips reload unless force=True.
@@ -97,7 +96,7 @@ def load_model(force: bool = False) -> bool:
     new_df1    = model_data["new_df1"].copy()
     df1        = model_data["df1"].copy()
     df2_clean  = model_data.get("df2_clean", pd.DataFrame()).copy()
-    user2idx   = model_data.get("user2idx",  {})
+    user2idx   = model_data.get("user2idx", {})
     title2idx  = model_data.get("title2idx", {})
     idx2title  = model_data.get("idx2title", {})
 
@@ -135,25 +134,24 @@ def _build_indexes() -> None:
 
     titles = new_df1["original_title"].astype(str).tolist()
     _title_to_content_idx = {t: i for i, t in enumerate(titles)}
-    _title_lookup          = {_clean_title(t): t for t in titles}
+    _title_lookup = {_clean_title(t): t for t in titles}
 
     meta = df1.copy()
     meta["original_title"] = meta["original_title"].astype(str)
 
-    popularity   = np.log1p(_as_number(meta.get("popularity",   pd.Series(index=meta.index))))
-    vote_count   = np.log1p(_as_number(meta.get("vote_count",   pd.Series(index=meta.index))))
-    vote_average =          _as_number(meta.get("vote_average", pd.Series(index=meta.index)))
+    popularity    = np.log1p(_as_number(meta.get("popularity",    pd.Series(index=meta.index))))
+    vote_count    = np.log1p(_as_number(meta.get("vote_count",    pd.Series(index=meta.index))))
+    vote_average  = _as_number(meta.get("vote_average",           pd.Series(index=meta.index)))
 
     meta["_vote_count"] = _as_number(meta.get("vote_count", pd.Series(index=meta.index)))
     meta["_runtime"]    = _as_number(meta.get("runtime",    pd.Series(index=meta.index)))
 
-    min_votes  = float(_as_number(meta.get("vote_count", pd.Series(index=meta.index))).quantile(0.70))
-    mean_vote  = float(vote_average.mean())
-
-    # Bayesian-style weighted vote: balances per-movie average against global mean
+    min_votes   = float(_as_number(meta.get("vote_count", pd.Series(index=meta.index))).quantile(0.70))
+    mean_vote   = float(vote_average.mean())
+    # Bayesian-style weighted vote combining per-movie average with global mean
     weighted_vote = (
         (vote_count / (vote_count + min_votes)) * vote_average
-        + (min_votes  / (vote_count + min_votes)) * mean_vote
+        + (min_votes / (vote_count + min_votes)) * mean_vote
     )
     meta["_quality"] = (
         0.50 * _normalize(weighted_vote)
@@ -178,10 +176,10 @@ def _build_indexes() -> None:
 
         _movie_meta[title] = {
             "genres":     set(genres),
-            "quality":    float(row.get("_quality",           0.0) or 0.0),
-            "language":   row.get("original_language",        None),
-            "vote_count": float(row.get("_vote_count",        0.0) or 0.0),
-            "runtime":    float(row.get("_runtime",           0.0) or 0.0),
+            "quality":    float(row.get("_quality",  0.0) or 0.0),
+            "language":   row.get("original_language", None),
+            "vote_count": float(row.get("_vote_count", 0.0) or 0.0),
+            "runtime":    float(row.get("_runtime",    0.0) or 0.0),
             "year":       release_year,
         }
 
@@ -200,19 +198,17 @@ def _top_sparse_scores(
     top_k: int,
     exclude_index: int | None = None,
 ) -> list[tuple[int, float]]:
-    """Return the top-k (col_index, score) pairs from a sparse CSR matrix row."""
+    """Return the top-k (index, score) pairs from a sparse CSR matrix row."""
     row     = matrix.getrow(row_index)
     indices = row.indices
     scores  = row.data
 
     if scores.size == 0:
         return []
-
     if exclude_index is not None:
         keep    = indices != exclude_index
         indices = indices[keep]
         scores  = scores[keep]
-
     if scores.size == 0:
         return []
 
@@ -238,19 +234,17 @@ def fuzzy_match_movies(
         clean = _clean_title(raw)
         if not clean:
             continue
-
-        # Exact cleaned match (fast path)
+        # Exact cleaned match first (fast path)
         exact = _title_lookup.get(clean)
         if exact:
             matches.append(exact)
             continue
-
         # Fuzzy fallback
         hit = process.extractOne(clean, clean_titles, scorer=fuzz.WRatio)
         if hit and hit[1] >= threshold:
             matches.append(_title_lookup[hit[0]])
 
-    return list(dict.fromkeys(matches))  # deduplicate, preserve insertion order
+    return list(dict.fromkeys(matches))  # deduplicate, preserve order
 
 
 def recommend_content_scores(
@@ -300,25 +294,21 @@ def _seed_genres(seed_movies: list[str]) -> set[str]:
 
 
 def _genre_overlap(candidate: str, seed_movies: list[str]) -> int:
-    return len(
-        _movie_meta.get(candidate, {}).get("genres", set())
-        & _seed_genres(seed_movies)
-    )
+    return len(_movie_meta.get(candidate, {}).get("genres", set()) & _seed_genres(seed_movies))
 
 
 def _genre_affinity(candidate: str, seed_movies: list[str]) -> float:
-    """Jaccard similarity between candidate genres and union of seed genres."""
     cg = _movie_meta.get(candidate, {}).get("genres", set())
     sg = _seed_genres(seed_movies)
     if not cg or not sg:
         return 0.0
-    return len(cg & sg) / len(cg | sg)
+    return len(cg & sg) / len(cg | sg)   # Jaccard similarity
 
 
 def _candidate_bonus(candidate: str, seed_movies: list[str]) -> float:
-    """Additive bonus for quality, genre affinity, and language match."""
+    """Small additive bonus for quality, genre affinity, and language match."""
     meta = _movie_meta.get(candidate, {})
-    quality_bonus  = 0.18 * float(meta.get("quality",  0.0))
+    quality_bonus  = 0.18 * float(meta.get("quality", 0.0))
     genre_bonus    = 0.16 * _genre_affinity(candidate, seed_movies)
     seed_languages = {
         _movie_meta.get(m, {}).get("language")
@@ -340,7 +330,7 @@ def _passes_quality_floor(candidate: str) -> bool:
 
 
 def _collab_weight(movie_title: str) -> float:
-    """Alpha blend weight for collaborative filtering (0.0 if unavailable)."""
+    """Alpha blend weight for collaborative filtering (0 if unavailable)."""
     if similarity_collab.shape[0] == 0 or movie_title not in title2idx:
         return 0.0
     return 0.32
@@ -375,12 +365,11 @@ def hybrid_recommend(
         if explain:
             print("No matching movies found.")
         return []
-
     if explain:
         print(f"Matched seeds: {', '.join(matched)}")
 
-    raw_scores:    dict[str, float] = {}
-    source_counts: dict[str, int]   = {}
+    raw_scores: dict[str, float] = {}
+    source_counts: dict[str, int] = {}
 
     for seed in matched:
         alpha          = _collab_weight(seed)
@@ -392,7 +381,7 @@ def hybrid_recommend(
                 continue
             blended = (
                 (1.0 - alpha) * content_scores.get(candidate, 0.0)
-                +       alpha  * collab_scores.get(candidate,  0.0)
+                + alpha       * collab_scores.get(candidate,  0.0)
             )
             raw_scores[candidate]    = raw_scores.get(candidate, 0.0) + blended
             source_counts[candidate] = source_counts.get(candidate, 0) + 1
@@ -400,7 +389,7 @@ def hybrid_recommend(
     if not raw_scores:
         return []
 
-    # Boost candidates surfaced by multiple seeds; add metadata bonuses
+    # Boost candidates recommended by multiple seeds and add metadata bonuses
     for candidate in list(raw_scores):
         coverage_bonus = 1.0 + 0.08 * max(source_counts[candidate] - 1, 0)
         raw_scores[candidate] = (
@@ -419,11 +408,11 @@ def hybrid_recommend(
                 and _passes_quality_floor(title)
             )
         }
-        # Only apply filter if it leaves enough candidates
+        # Only apply the filter if it leaves enough candidates
         if len(genre_filtered) >= top_n:
             raw_scores = genre_filtered
 
-    normalized      = normalize_scores(raw_scores)
+    normalized     = normalize_scores(raw_scores)
     recommendations = sorted(normalized.items(), key=lambda x: x[1], reverse=True)
     return recommendations[:top_n]
 
@@ -438,7 +427,7 @@ def interactive_mode() -> None:
         user_input = input("Movies you like: ").strip()
         if user_input.casefold() in {"quit", "exit"}:
             break
-        movies  = [m.strip() for m in user_input.split(",") if m.strip()]
+        movies = [m.strip() for m in user_input.split(",") if m.strip()]
         results = hybrid_recommend(movies, top_n=8)
         if not results:
             print("No recommendations found.")
@@ -452,4 +441,3 @@ def interactive_mode() -> None:
 if __name__ == "__main__":
     load_model()
     interactive_mode()
-    
