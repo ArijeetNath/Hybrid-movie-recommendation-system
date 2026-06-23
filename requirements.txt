@@ -1,3 +1,25 @@
-altair
-pandas
-streamlit
+# ── Core web framework ────────────────────────────────────────────────────────
+streamlit>=1.35.0
+
+# ── Data & ML ─────────────────────────────────────────────────────────────────
+numpy>=1.26.0
+pandas>=2.2.0
+scikit-learn>=1.4.0
+scipy>=1.13.0
+
+# ── Fuzzy matching ────────────────────────────────────────────────────────────
+rapidfuzz>=3.8.0
+
+# ── Image handling ────────────────────────────────────────────────────────────
+Pillow>=10.3.0
+
+# ── HTTP / networking ─────────────────────────────────────────────────────────
+requests>=2.31.0
+urllib3>=2.2.0
+
+# ── Environment variables (.env file support) ─────────────────────────────────
+python_dotenv>=1.0.0
+
+# ── Optional: PostgreSQL persistence (only needed if DATABASE_URL is set) ─────
+sqlalchemy>=2.0.0
+psycopg2-binary>=2.9.9
