@@ -560,7 +560,8 @@ def render_recommendation(eng: dict, rec: dict, col) -> None:
     movie = rec["movie"]
     with col:
         with st.container(border=True):
-            st.image(poster_for(movie), width="stretch")
+            # NOTE: use_container_width replaces the unsupported width="stretch"
+            st.image(poster_for(movie), use_container_width=True)
 
             year = (movie["release_date"] or "").split("-")[0]
             st.markdown(
@@ -593,13 +594,13 @@ def render_recommendation(eng: dict, rec: dict, col) -> None:
             c1, c2, c3 = st.columns(3)
             uid = st.session_state.user_id
 
-            if c1.button("❤ Fav",    key=f"fav_{key}",   width="stretch"):
+            if c1.button("❤ Fav",    key=f"fav_{key}",   use_container_width=True):
                 record_action(uid, "favorite",  movie["title"])
                 st.toast(f"Added {movie['title']} to favorites")
-            if c2.button("➕ Later",  key=f"watch_{key}", width="stretch"):
+            if c2.button("➕ Later",  key=f"watch_{key}", use_container_width=True):
                 record_action(uid, "watchlist", movie["title"])
                 st.toast(f"Added {movie['title']} to watchlist")
-            if c3.button("✔ Seen",   key=f"seen_{key}",  width="stretch"):
+            if c3.button("✔ Seen",   key=f"seen_{key}",  use_container_width=True):
                 record_action(uid, "watched",   movie["title"])
                 st.toast(f"Marked {movie['title']} as watched")
 
@@ -650,7 +651,9 @@ def main() -> None:
                     yr = (m["release_date"] or "").split("-")[0]
                     label = f"➕ {m['title']}" + (f" ({yr})" if yr else "")
                     st.button(
-                        label, key=f"add_{m['title']}", width="stretch",
+                        label,
+                        key=f"add_{m['title']}",
+                        use_container_width=True,
                         on_click=lambda t=m["title"]: st.session_state.selected.append(t),
                     )
             else:
@@ -669,7 +672,8 @@ def main() -> None:
             c2.button("✕", key=f"rm_{title}", on_click=lambda t=title: st.session_state.selected.remove(t))
         if st.session_state.selected:
             st.button(
-                "Clear seed playlist", width="stretch",
+                "Clear seed playlist",
+                use_container_width=True,
                 on_click=lambda: st.session_state.update(selected=[]),
             )
 
