@@ -1,22 +1,25 @@
-# src/streamlit_app.py
-# Hybrid Movie Recommendation System — Streamlit front-end
+# app.py
+# Hybrid Movie Recommendation System — Streamlit UI
 #
 # Project structure:
 #   HYBRID-MOVIE-RECOMMENDER/
-#   ├── src/
-#   │   ├── Model/
-#   │   │   ├── collab_similarity.npz        ← item-item collaborative filtering matrix
-#   │   │   ├── content_similarity.npz       ← content-based similarity matrix
-#   │   │   ├── hybrid_recommender_model.pkl ← dataframes + lookup dicts
-#   │   │   └── model.py                     ← recommendation engine
-#   │   └── streamlit_app.py                 ← this file
-#   ├── .gitattributes
-#   ├── .gitignore
+#   ├── Model/
+#   │   ├── collab_similarity.npz        ← item-item collaborative filtering matrix
+#   │   ├── content_similarity.npz       ← content-based similarity matrix
+#   │   ├── hybrid_recommender_model.pkl ← dataframes + lookup dicts
+#   │   └── model.py                     ← recommendation engine
+#   ├── app.py                           ← this file (HF / Docker entrypoint)
+#   ├── Dockerfile
+#   ├── requirements.txt
 #   ├── README.md
-#   └── requirements.txt
+#   └── .gitattributes
 #
-# Run with:
-#   streamlit run src/streamlit_app.py
+# Run locally:
+#   streamlit run app.py
+#
+# Run on Hugging Face Spaces:
+#   Built and launched by the Dockerfile via `streamlit run app.py`
+#   on 0.0.0.0:$PORT (defaults to 7860).
 
 import ast
 import io
@@ -36,7 +39,6 @@ import requests
 import streamlit as st
 from dotenv import load_dotenv
 from PIL import Image, ImageDraw
-from scipy.sparse import load_npz
 
 load_dotenv()
 warnings.filterwarnings("ignore")
@@ -44,31 +46,31 @@ warnings.filterwarnings("ignore")
 # ---------------------------------------------------------------------------
 # Path setup
 # ---------------------------------------------------------------------------
-# __file__ → src/streamlit_app.py
-# SRC_DIR  → src/
-# MODEL_DIR → src/Model/
+# __file__   → app.py (repo root)
+# ROOT_DIR   → repo root
+# MODEL_DIR  → Model/
 #
-# We insert SRC_DIR into sys.path so that `from Model.model import …`
-# resolves correctly regardless of the working directory (local or HF Space).
+# Ensure ROOT_DIR is on sys.path so `from Model.model import …`
+# always resolves, regardless of the working directory
+# (local dev, Docker container, or HF Space runtime).
 # ---------------------------------------------------------------------------
-SRC_DIR   = Path(__file__).resolve().parent          # → .../src/
-MODEL_DIR = SRC_DIR / "Model"                        # → .../src/Model/
+ROOT_DIR  = Path(__file__).resolve().parent     # → repo root
+MODEL_DIR = ROOT_DIR / "Model"                  # → Model/
 
-if str(SRC_DIR) not in sys.path:
-    sys.path.insert(0, str(SRC_DIR))
-
-# ---------------------------------------------------------------------------
-# Artifact paths (read directly by load_engine for metadata; the heavy
-# similarity matrices are loaded inside model.py via the same BASE_DIR logic)
-# ---------------------------------------------------------------------------
-PKL_PATH            = MODEL_DIR / "hybrid_recommender_model.pkl"  # dataframes + lookup dicts
-CONTENT_SIM_PATH    = MODEL_DIR / "content_similarity.npz"        # content-based sparse matrix
-COLLAB_SIM_PATH     = MODEL_DIR / "collab_similarity.npz"         # collaborative filtering sparse matrix
+if str(ROOT_DIR) not in sys.path:
+    sys.path.insert(0, str(ROOT_DIR))
 
 # ---------------------------------------------------------------------------
-# Import the recommendation engine from src/Model/model.py
+# Artifact paths (model.py loads its own copies via its own BASE_DIR)
 # ---------------------------------------------------------------------------
-from Model.model import (           # noqa: E402  (import after sys.path patch)
+PKL_PATH         = MODEL_DIR / "hybrid_recommender_model.pkl"  # dataframes + lookup dicts
+CONTENT_SIM_PATH = MODEL_DIR / "content_similarity.npz"        # content-based sparse matrix
+COLLAB_SIM_PATH  = MODEL_DIR / "collab_similarity.npz"         # collaborative filtering sparse matrix
+
+# ---------------------------------------------------------------------------
+# Import the recommendation engine from Model/model.py
+# ---------------------------------------------------------------------------
+from Model.model import (              # noqa: E402  (import after sys.path patch)
     load_model,
     hybrid_recommend,
     fuzzy_match_movies as engine_fuzzy_match,
@@ -115,13 +117,13 @@ _UA = {
     "Accept-Language": "en-US,en;q=0.9",
 }
 
-_POSTER_CACHE_LIMIT = 1500   # max in-memory cached posters
-_MAX_POSTER_ATTEMPTS = 4     # give up after this many failed fetches per movie
+_POSTER_CACHE_LIMIT  = 1500   # max in-memory cached posters
+_MAX_POSTER_ATTEMPTS = 4      # give up after this many failed fetches per movie
 
-_poster_cache:       dict[str, bytes] = {}
-_poster_attempts:    dict[str, int]   = {}
+_poster_cache:      dict[str, bytes] = {}
+_poster_attempts:   dict[str, int]   = {}
 _poster_lock = threading.Lock()
-_placeholder_cache:  dict[str, bytes] = {}
+_placeholder_cache: dict[str, bytes] = {}
 
 
 def _new_session() -> requests.Session:
@@ -145,7 +147,6 @@ def _new_session() -> requests.Session:
 
 def _extract_poster_url(page_html: str) -> str:
     """Scrape og:image or direct media URL from a TMDB movie page."""
-    import re
     m = re.search(
         r'<meta[^>]+property=["\']og:image["\'][^>]+content=["\']([^"\']+)["\']',
         page_html, re.IGNORECASE,
@@ -167,6 +168,8 @@ def _download_poster_bytes(tmdb_id: str) -> bytes | None:
     Strategy:
       1. TMDB REST API  (requires _TMDB_API_KEY)
       2. Scrape the public TMDB movie page as fallback
+
+    All outbound traffic is HTTPS (port 443) — HF Spaces compliant.
     """
     if not tmdb_id:
         return None
@@ -265,7 +268,7 @@ def placeholder_poster(title=None) -> bytes:
     draw = ImageDraw.Draw(img)
     draw.rectangle([28, 32, 472, 718], outline=(99, 102, 241), width=3)
     text = key if len(key) <= 22 else key[:21] + "…"
-    draw.text((250, 360), text,               fill=(229, 231, 235), anchor="mm")
+    draw.text((250, 360), text,                 fill=(229, 231, 235), anchor="mm")
     draw.text((250, 396), "poster unavailable", fill=(148, 163, 184), anchor="mm")
     buf = io.BytesIO()
     img.save(buf, format="PNG")
@@ -301,7 +304,7 @@ def load_engine() -> dict:
     """
     Load all recommender artifacts and build the metadata lookup table.
 
-    Artifacts loaded:
+    Artifacts loaded (all from Model/):
       • hybrid_recommender_model.pkl  — new_df1, df1, df2_clean, title2idx,
                                         idx2title (no CSV files needed at runtime)
       • content_similarity.npz        — prebuilt content-based sparse matrix
@@ -309,9 +312,9 @@ def load_engine() -> dict:
       • collab_similarity.npz         — prebuilt collaborative filtering sparse
                                         matrix (loaded inside model.py via BASE_DIR)
 
-    model.py handles its own artifact loading via load_model(); this function
-    loads the pkl separately only to extract the display metadata (df1) that
-    is needed for the Streamlit UI (poster URLs, genres, taglines, etc.).
+    model.py owns the recommendation state; this function additionally reads
+    the pickle to extract display metadata (df1) for the Streamlit UI
+    (poster URLs, genres, taglines, etc.).
     """
     # Validate artifacts before doing anything else
     for path in (PKL_PATH, CONTENT_SIM_PATH, COLLAB_SIM_PATH):
@@ -330,11 +333,11 @@ def load_engine() -> dict:
     with open(PKL_PATH, "rb") as f:
         model_data = pickle.load(f)
 
-    new_df1   = model_data["new_df1"]   # tagged movie dataframe used for content scoring
-    df1       = model_data["df1"]       # full movie metadata dataframe
-    df2_clean = model_data.get("df2_clean", pd.DataFrame())  # user ratings (may be empty)
-    title2idx = model_data.get("title2idx", {})  # movie title → collab matrix row index
-    idx2title = model_data.get("idx2title", {})  # collab matrix row index → movie title
+    new_df1   = model_data["new_df1"]                          # tagged movie dataframe
+    df1       = model_data["df1"]                              # full movie metadata
+    df2_clean = model_data.get("df2_clean", pd.DataFrame())    # user ratings (optional)
+    title2idx = model_data.get("title2idx", {})                # title → collab matrix index
+    idx2title = model_data.get("idx2title", {})                # collab matrix index → title
 
     # --- Build display metadata lookup (title → display dict) ---
     d = df1.copy()
@@ -415,7 +418,6 @@ def get_recommendations(
     for title, score in raw_results:
         if title not in meta:
             continue
-        # Determine badge label based on which signals contributed
         results.append({
             "movie":      meta[title],
             "score":      float(score),
@@ -432,8 +434,8 @@ def get_recommendations(
 def get_db_engine():
     """
     Connect to Postgres if DATABASE_URL is set in the environment.
-    Returns None silently when no database is configured (local / HF Space
-    without a linked DB).
+    Returns None silently when no database is configured
+    (local dev, or HF Space without a linked DB).
     """
     url = os.getenv("DATABASE_URL")
     if not url:

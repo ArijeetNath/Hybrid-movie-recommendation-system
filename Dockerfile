@@ -1,60 +1,90 @@
 # Dockerfile
-# Hybrid Movie Recommendation System — containerised Streamlit app
+# Hybrid Movie Recommendation System — Hugging Face Docker Space
 #
 # Project structure inside the container:
 #   /app/
+#   ├── app.py                ← Streamlit UI (entrypoint)
 #   ├── requirements.txt
-#   └── src/
-#       ├── Model/
-#       │   ├── collab_similarity.npz
-#       │   ├── content_similarity.npz
-#       │   ├── hybrid_recommender_model.pkl
-#       │   └── model.py
-#       └── streamlit_app.py
+#   └── Model/
+#       ├── collab_similarity.npz
+#       ├── content_similarity.npz
+#       ├── hybrid_recommender_model.pkl
+#       └── model.py
 #
-# Build:
+# Local build & run:
 #   docker build -t hybrid-movie-recommender .
+#   docker run -p 7860:7860 hybrid-movie-recommender
 #
-# Run:
-#   docker run -p 8501:8501 hybrid-movie-recommender
+# With optional environment variables:
+#   docker run -p 7860:7860 -e TMDB_API_KEY=<key> hybrid-movie-recommender
+#   docker run -p 7860:7860 -e DATABASE_URL=<url> hybrid-movie-recommender
 #
-# Run with TMDB poster support (optional):
-#   docker run -p 8501:8501 -e TMDB_API_KEY=your_key_here hybrid-movie-recommender
+# Hugging Face Spaces conventions enforced:
+#   • App listens on $PORT (defaults to 7860)
+#   • Container runs as non-root user (uid 1000)
+#   • Dependencies installed explicitly from requirements.txt
+#   • Streamlit binds to 0.0.0.0 for external reachability
 
 # --- Base image ---
-FROM python:3.13.5-slim
+FROM python:3.11-slim
+
+# --- Environment defaults ---
+# PORT can be overridden by the HF Spaces runtime
+ENV PORT=7860 \
+    PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    PIP_NO_CACHE_DIR=1 \
+    PIP_DISABLE_PIP_VERSION_CHECK=1
 
 # --- Working directory ---
 WORKDIR /app
 
 # --- System dependencies ---
-# build-essential: required by scipy / scikit-learn wheel compilation
-# curl:            used by the HEALTHCHECK probe
-# git:             required by some pip packages that pull from VCS
-RUN apt-get update && apt-get install -y \
-    build-essential \
-    curl \
-    git \
+# build-essential : needed for scipy / scikit-learn wheel compilation
+# curl            : used by the HEALTHCHECK probe
+# git             : sometimes required by pip when pulling VCS-based deps
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        build-essential \
+        curl \
+        git \
     && rm -rf /var/lib/apt/lists/*
 
-# --- Python dependencies ---
-# Copied first so Docker caches this layer when only source code changes
+# --- Python dependencies (cached layer) ---
+# Copy requirements first so this layer is reused when only source code changes.
 COPY requirements.txt ./
-RUN pip3 install --no-cache-dir -r requirements.txt
+RUN pip install --no-cache-dir -r requirements.txt
 
 # --- Application source + model artifacts ---
-# Copies src/streamlit_app.py and src/Model/ (model.py + .npz + .pkl)
-COPY src/ ./src/
+# Copies the Streamlit app and the entire Model/ directory
+# (model.py + content_similarity.npz + collab_similarity.npz + .pkl).
+COPY app.py   ./
+COPY Model/   ./Model/
 
-# --- Port ---
-EXPOSE 8501
+# --- Non-root user (HF Spaces best practice) ---
+# Create a dedicated user, take ownership of /app, and switch to it.
+RUN useradd -m -u 1000 user \
+    && chown -R user:user /app
+USER user
+
+# --- Streamlit cache locations (must be writable by non-root user) ---
+ENV STREAMLIT_HOME=/home/user/.streamlit \
+    XDG_CACHE_HOME=/home/user/.cache
+
+# --- Network port ---
+EXPOSE 7860
 
 # --- Health check ---
-# Streamlit exposes a built-in health endpoint at /_stcore/health
-HEALTHCHECK CMD curl --fail http://localhost:8501/_stcore/health || exit 1
+# Streamlit exposes a built-in readiness endpoint at /_stcore/health.
+# Uses $PORT so the probe always matches the runtime port.
+HEALTHCHECK --interval=30s --timeout=5s --start-period=40s --retries=3 \
+    CMD curl --fail "http://localhost:${PORT}/_stcore/health" || exit 1
 
 # --- Entrypoint ---
-# Launches the Streamlit app on 0.0.0.0:8501 so the container port is reachable
-ENTRYPOINT ["streamlit", "run", "src/streamlit_app.py", \
-            "--server.port=8501", \
-            "--server.address=0.0.0.0"]
+# Use shell form so $PORT is expanded at container start.
+# --server.address=0.0.0.0 makes the app reachable outside the container.
+# --server.headless=true skips Streamlit's first-run prompts.
+CMD streamlit run app.py \
+        --server.port=${PORT} \
+        --server.address=0.0.0.0 \
+        --server.headless=true \
+        --browser.gatherUsageStats=false
