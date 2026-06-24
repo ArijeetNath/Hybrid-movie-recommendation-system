@@ -1,21 +1,21 @@
-# Model/model.py
+# model/model.py
 # Hybrid Movie Recommendation System — core engine
 #
 # Project structure:
 #   HYBRID-MOVIE-RECOMMENDER/
-#   ├── Model/
-#   │   ├── collab_similarity.npz        ← item-item collaborative filtering matrix
-#   │   ├── content_similarity.npz       ← content-based similarity matrix
-#   │   ├── hybrid_recommender_model.pkl ← dataframes + lookup dicts
-#   │   └── model.py                     ← this file
-#   ├── app.py                           ← Streamlit UI (HF / Docker entrypoint)
+#   ├── model/                              ← lowercase, matches filesystem
+#   │   ├── collab_similarity.npz           ← item-item collaborative filtering matrix
+#   │   ├── content_similarity.npz          ← content-based similarity matrix
+#   │   ├── hybrid_recommender_model.pkl    ← dataframes + lookup dicts
+#   │   └── model.py                        ← this file
+#   ├── app.py                              ← Streamlit UI (container entrypoint)
 #   ├── Dockerfile
 #   ├── requirements.txt
 #   ├── README.md
 #   └── .gitattributes
 #
 # Imported by app.py via:
-#   from Model.model import load_model, hybrid_recommend, ...
+#   from model.model import load_model, hybrid_recommend, ...
 
 from __future__ import annotations
 
@@ -34,16 +34,16 @@ from scipy.sparse import load_npz
 # ---------------------------------------------------------------------------
 # Artifact paths
 # ---------------------------------------------------------------------------
-# __file__  →  Model/model.py
-# BASE_DIR  →  Model/
-# All three artifacts live alongside model.py, so paths resolve correctly
-# whether this module is run directly, imported from app.py, or executed
+# __file__  →  model/model.py
+# BASE_DIR  →  model/
+# All three artifacts live alongside this file, so paths resolve correctly
+# whether the module is run directly, imported from app.py, or executed
 # inside the Docker container on Hugging Face Spaces.
 # ---------------------------------------------------------------------------
-BASE_DIR                = Path(__file__).resolve().parent           # → .../Model/
-MODEL_PATH              = BASE_DIR / "hybrid_recommender_model.pkl" # → .../Model/hybrid_recommender_model.pkl
-CONTENT_SIMILARITY_PATH = BASE_DIR / "content_similarity.npz"       # → .../Model/content_similarity.npz
-COLLAB_SIMILARITY_PATH  = BASE_DIR / "collab_similarity.npz"        # → .../Model/collab_similarity.npz
+BASE_DIR                = Path(__file__).resolve().parent           # → .../model/
+MODEL_PATH              = BASE_DIR / "hybrid_recommender_model.pkl" # → .../model/hybrid_recommender_model.pkl
+CONTENT_SIMILARITY_PATH = BASE_DIR / "content_similarity.npz"       # → .../model/content_similarity.npz
+COLLAB_SIMILARITY_PATH  = BASE_DIR / "collab_similarity.npz"        # → .../model/collab_similarity.npz
 
 # ---------------------------------------------------------------------------
 # Tuning constants
@@ -86,7 +86,7 @@ def _load_pickle(path: Path) -> dict:
 
 def load_model(force: bool = False) -> bool:
     """
-    Load all recommender artifacts from Model/.
+    Load all recommender artifacts from model/.
 
     Called once on startup by app.py (via st.cache_resource).
     Safe to call multiple times — skips reload unless force=True.

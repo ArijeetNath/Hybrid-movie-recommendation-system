@@ -3,12 +3,12 @@
 #
 # Project structure:
 #   HYBRID-MOVIE-RECOMMENDER/
-#   ├── Model/
-#   │   ├── collab_similarity.npz        ← item-item collaborative filtering matrix
-#   │   ├── content_similarity.npz       ← content-based similarity matrix
-#   │   ├── hybrid_recommender_model.pkl ← dataframes + lookup dicts
-#   │   └── model.py                     ← recommendation engine
-#   ├── app.py                           ← this file (HF / Docker entrypoint)
+#   ├── model/                              ← lowercase, matches filesystem
+#   │   ├── collab_similarity.npz           ← item-item collaborative filtering matrix
+#   │   ├── content_similarity.npz          ← content-based similarity matrix
+#   │   ├── hybrid_recommender_model.pkl    ← dataframes + lookup dicts
+#   │   └── model.py                        ← recommendation engine
+#   ├── app.py                              ← this file (container entrypoint)
 #   ├── Dockerfile
 #   ├── requirements.txt
 #   ├── README.md
@@ -17,7 +17,7 @@
 # Run locally:
 #   streamlit run app.py
 #
-# Run on Hugging Face Spaces:
+# Run on Hugging Face Spaces (Docker SDK):
 #   Built and launched by the Dockerfile via `streamlit run app.py`
 #   on 0.0.0.0:$PORT (defaults to 7860).
 
@@ -48,29 +48,28 @@ warnings.filterwarnings("ignore")
 # ---------------------------------------------------------------------------
 # __file__   → app.py (repo root)
 # ROOT_DIR   → repo root
-# MODEL_DIR  → Model/
+# MODEL_DIR  → model/   (lowercase — Linux is case-sensitive)
 #
-# Ensure ROOT_DIR is on sys.path so `from Model.model import …`
-# always resolves, regardless of the working directory
-# (local dev, Docker container, or HF Space runtime).
+# Insert ROOT_DIR into sys.path so `from model.model import …` resolves
+# regardless of the working directory (local dev, Docker, or HF Space).
 # ---------------------------------------------------------------------------
 ROOT_DIR  = Path(__file__).resolve().parent     # → repo root
-MODEL_DIR = ROOT_DIR / "Model"                  # → Model/
+MODEL_DIR = ROOT_DIR / "model"                  # → model/  (lowercase!)
 
 if str(ROOT_DIR) not in sys.path:
     sys.path.insert(0, str(ROOT_DIR))
 
 # ---------------------------------------------------------------------------
-# Artifact paths (model.py loads its own copies via its own BASE_DIR)
+# Artifact paths (model/model.py loads its own copies via its own BASE_DIR)
 # ---------------------------------------------------------------------------
 PKL_PATH         = MODEL_DIR / "hybrid_recommender_model.pkl"  # dataframes + lookup dicts
 CONTENT_SIM_PATH = MODEL_DIR / "content_similarity.npz"        # content-based sparse matrix
 COLLAB_SIM_PATH  = MODEL_DIR / "collab_similarity.npz"         # collaborative filtering sparse matrix
 
 # ---------------------------------------------------------------------------
-# Import the recommendation engine from Model/model.py
+# Import the recommendation engine from model/model.py
 # ---------------------------------------------------------------------------
-from Model.model import (              # noqa: E402  (import after sys.path patch)
+from model.model import (              # noqa: E402  (import after sys.path patch)
     load_model,
     hybrid_recommend,
     fuzzy_match_movies as engine_fuzzy_match,
@@ -304,16 +303,16 @@ def load_engine() -> dict:
     """
     Load all recommender artifacts and build the metadata lookup table.
 
-    Artifacts loaded (all from Model/):
+    Artifacts loaded (all from model/):
       • hybrid_recommender_model.pkl  — new_df1, df1, df2_clean, title2idx,
                                         idx2title (no CSV files needed at runtime)
       • content_similarity.npz        — prebuilt content-based sparse matrix
-                                        (loaded inside model.py via BASE_DIR)
+                                        (loaded inside model/model.py via BASE_DIR)
       • collab_similarity.npz         — prebuilt collaborative filtering sparse
-                                        matrix (loaded inside model.py via BASE_DIR)
+                                        matrix (loaded inside model/model.py via BASE_DIR)
 
-    model.py owns the recommendation state; this function additionally reads
-    the pickle to extract display metadata (df1) for the Streamlit UI
+    model/model.py owns the recommendation state; this function additionally
+    reads the pickle to extract display metadata (df1) for the Streamlit UI
     (poster URLs, genres, taglines, etc.).
     """
     # Validate artifacts before doing anything else
@@ -324,11 +323,11 @@ def load_engine() -> dict:
                 f"Expected location: {MODEL_DIR}"
             )
 
-    # Trigger model.py to load its own copies of the matrices + dataframes
+    # Trigger model/model.py to load its own copies of the matrices + dataframes
     load_model()
 
     # Load the pickle a second time only to extract display metadata for the UI.
-    # model.py already holds the recommender state; we just need df1 here.
+    # model/model.py already holds the recommender state; we just need df1 here.
     import pickle
     with open(PKL_PATH, "rb") as f:
         model_data = pickle.load(f)
@@ -391,7 +390,7 @@ def get_recommendations(
     use_genre_filter: bool = True,
 ) -> tuple[list[dict], list[str]]:
     """
-    Thin wrapper around model.py's hybrid_recommend().
+    Thin wrapper around model/model.py's hybrid_recommend().
 
     Converts (title, score) pairs returned by the engine into the richer
     display dicts that the UI expects, adding poster/metadata fields.
@@ -399,8 +398,8 @@ def get_recommendations(
     if not movies:
         return [], []
 
-    # engine_fuzzy_match is imported from model.py; it uses the same title
-    # index that was built during load_model(), so no duplication occurs.
+    # engine_fuzzy_match is imported from model/model.py; it uses the same
+    # title index that was built during load_model(), so no duplication occurs.
     matched = engine_fuzzy_match(movies)
     if not matched:
         return [], []

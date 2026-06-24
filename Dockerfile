@@ -5,7 +5,7 @@
 #   /app/
 #   ├── app.py                ← Streamlit UI (entrypoint)
 #   ├── requirements.txt
-#   └── Model/
+#   └── model/                ← lowercase, matches the repository on disk
 #       ├── collab_similarity.npz
 #       ├── content_similarity.npz
 #       ├── hybrid_recommender_model.pkl
@@ -55,10 +55,9 @@ COPY requirements.txt ./
 RUN pip install --no-cache-dir -r requirements.txt
 
 # --- Application source + model artifacts ---
-# Copies the Streamlit app and the entire Model/ directory
-# (model.py + content_similarity.npz + collab_similarity.npz + .pkl).
+# Linux containers are case-sensitive: folder name must match repo exactly.
 COPY app.py   ./
-COPY Model/   ./Model/
+COPY model/   ./model/
 
 # --- Non-root user (HF Spaces best practice) ---
 # Create a dedicated user, take ownership of /app, and switch to it.
@@ -80,7 +79,7 @@ HEALTHCHECK --interval=30s --timeout=5s --start-period=40s --retries=3 \
     CMD curl --fail "http://localhost:${PORT}/_stcore/health" || exit 1
 
 # --- Entrypoint ---
-# Use shell form so $PORT is expanded at container start.
+# Shell form so $PORT is expanded at container start.
 # --server.address=0.0.0.0 makes the app reachable outside the container.
 # --server.headless=true skips Streamlit's first-run prompts.
 CMD streamlit run app.py \
