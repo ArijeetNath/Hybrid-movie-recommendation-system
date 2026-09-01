@@ -30,7 +30,6 @@ import threading
 import time
 import warnings
 from concurrent.futures import ThreadPoolExecutor
-from datetime import datetime, timezone
 from pathlib import Path
 
 import numpy as np
@@ -81,7 +80,6 @@ TMDB_POSTER_BASE = "https://image.tmdb.org/t/p/w500"
 
 st.set_page_config(
     page_title="Hybrid Movie Recommendation System",
-    page_icon="🎬",
     layout="wide",
     initial_sidebar_state="expanded",
 )
@@ -427,74 +425,13 @@ def get_recommendations(
 
 
 # ---------------------------------------------------------------------------
-# Optional database (Postgres via SQLAlchemy)
-# ---------------------------------------------------------------------------
-@st.cache_resource(show_spinner=False)
-def get_db_engine():
-    """
-    Connect to Postgres if DATABASE_URL is set in the environment.
-    Returns None silently when no database is configured
-    (local dev, or HF Space without a linked DB).
-    """
-    url = os.getenv("DATABASE_URL")
-    if not url:
-        return None
-    try:
-        from sqlalchemy import create_engine, text
-        engine = create_engine(
-            url.replace("postgres://", "postgresql://", 1),
-            pool_pre_ping=True,
-            future=True,
-        )
-        with engine.begin() as conn:
-            conn.execute(text(
-                "CREATE TABLE IF NOT EXISTS user_actions ("
-                "  id          SERIAL PRIMARY KEY,"
-                "  user_id     VARCHAR(128),"
-                "  action      VARCHAR(32),"
-                "  movie_title VARCHAR(512),"
-                "  rating      REAL,"
-                "  ts          TIMESTAMPTZ DEFAULT now()"
-                ")"
-            ))
-        return engine
-    except Exception:
-        return None
-
-
-def record_action(user_id: str, action: str, movie_title: str, rating=None) -> bool:
-    """Persist a user interaction to session state and optionally to Postgres."""
-    st.session_state.actions.setdefault(action, {})[movie_title] = {
-        "rating": rating,
-        "ts":     datetime.now(timezone.utc).isoformat(),
-    }
-    engine = get_db_engine()
-    if not engine:
-        return False
-    try:
-        from sqlalchemy import text
-        with engine.begin() as conn:
-            conn.execute(
-                text("INSERT INTO user_actions (user_id, action, movie_title, rating) "
-                     "VALUES (:u, :a, :m, :r)"),
-                {"u": user_id, "a": action, "m": movie_title, "r": rating},
-            )
-        return True
-    except Exception:
-        return False
-
-
-# ---------------------------------------------------------------------------
 # Session state initialisation
 # ---------------------------------------------------------------------------
 def init_state() -> None:
     ss = st.session_state
     ss.setdefault("selected",     [])
-    ss.setdefault("actions",      {})
-    ss.setdefault("user_id",      f"user_{int(time.time())}")
     ss.setdefault("top_n",        10)
     ss.setdefault("genre_filter", True)
-    ss.setdefault("sort_by",      "Match Score")
 
 
 # ---------------------------------------------------------------------------
@@ -523,35 +460,17 @@ CUSTOM_CSS = """
 def render_about(eng: dict) -> None:
     """Landing page shown when no seed movies have been selected yet."""
     n_movies  = len(eng["metadata_lookup"])
-    df2       = eng["df2_clean"]
-    n_ratings = len(df2) if df2 is not None and not df2.empty else 0
-    n_users   = df2["userId"].nunique() if n_ratings > 0 else 0
 
     st.title("🎬 Hybrid Movie Recommendation System")
     st.markdown(
-        "A recommender that blends **content-based similarity** with "
-        "**collaborative filtering** to suggest films from a few titles you like — "
-        "served end-to-end as a single Streamlit app."
+        "A hybrid recommender system that blends **content-based similarity** with "
+        "**collaborative filtering** to suggest movies based on your favorites."
     )
 
-    c1, c2, c3, c4 = st.columns(4)
-    c1.metric("Movies",       f"{n_movies:,}")
-    c2.metric("User ratings", f"{n_ratings:,}")
-    c3.metric("Peak RAM",     "< 1 GB")
-    c4.metric("Latency",      "~20 ms / query")
+    c1, c2 = st.columns(2)
+    c1.metric("Movies in Database", f"{n_movies:,}")
+    c2.metric("Recommendation Speed", "~20 ms")
 
-    st.subheader("How the model works")
-    st.markdown(f"""
-- **Hybrid engine** — content similarity (prebuilt `content_similarity.npz`) blended
-  with item–item **collaborative filtering** (`collab_similarity.npz`).
-- **No CSVs at runtime** — all data is stored inside `hybrid_recommender_model.pkl`;
-  the raw dataset files are not needed after training.
-- **Memory-efficient** — sparse `.npz` matrices; runs well under **1 GB of RAM**.
-- **Smart ranking** — fuzzy title matching (RapidFuzz), quality floor, Jaccard
-  genre affinity, and multi-seed coverage boosting.
-- **Data** — ~{n_movies:,} movies (TMDB) · ~{n_ratings:,} ratings from {n_users:,}
-  users (MovieLens).
-    """)
     st.info("⬅ Search for a movie in the sidebar to generate recommendations.")
 
 
@@ -561,7 +480,7 @@ def render_recommendation(eng: dict, rec: dict, col) -> None:
     with col:
         with st.container(border=True):
             # NOTE: use_container_width replaces the unsupported width="stretch"
-            st.image(poster_for(movie), use_container_width=True)
+            st.image(poster_for(movie))
 
             year = (movie["release_date"] or "").split("-")[0]
             st.markdown(
@@ -589,25 +508,6 @@ def render_recommendation(eng: dict, rec: dict, col) -> None:
             if movie["overview"]:
                 with st.expander("Overview"):
                     st.write(movie["overview"])
-
-            key = re.sub(r"\W+", "_", movie["title"])[:60]
-            c1, c2, c3 = st.columns(3)
-            uid = st.session_state.user_id
-
-            if c1.button("❤ Fav",    key=f"fav_{key}",   use_container_width=True):
-                record_action(uid, "favorite",  movie["title"])
-                st.toast(f"Added {movie['title']} to favorites")
-            if c2.button("➕ Later",  key=f"watch_{key}", use_container_width=True):
-                record_action(uid, "watchlist", movie["title"])
-                st.toast(f"Added {movie['title']} to watchlist")
-            if c3.button("✔ Seen",   key=f"seen_{key}",  use_container_width=True):
-                record_action(uid, "watched",   movie["title"])
-                st.toast(f"Marked {movie['title']} as watched")
-
-            rating = st.slider("Your rating", 0, 5, 0, key=f"rate_{key}")
-            if rating > 0 and st.session_state.actions.get("rating", {}).get(movie["title"], {}).get("rating") != rating:
-                record_action(uid, "rating", movie["title"], rating=rating)
-                st.toast(f"Rated {movie['title']} {rating}/5")
 
 
 # ---------------------------------------------------------------------------
@@ -653,16 +553,14 @@ def main() -> None:
                     st.button(
                         label,
                         key=f"add_{m['title']}",
-                        use_container_width=True,
                         on_click=lambda t=m["title"]: st.session_state.selected.append(t),
                     )
             else:
                 st.caption("No matches found.")
 
         st.divider()
-        st.subheader("Parameters")
-        st.session_state.top_n        = st.slider("Quantity", 1, 20, st.session_state.top_n)
-        st.session_state.genre_filter = st.checkbox("Strict genre blending", value=st.session_state.genre_filter)
+        st.subheader("Settings")
+        st.session_state.top_n = st.slider("Number of recommendations", 5, 20, st.session_state.top_n)
 
         st.divider()
         st.subheader(f"Seed playlist ({len(st.session_state.selected)})")
@@ -673,7 +571,6 @@ def main() -> None:
         if st.session_state.selected:
             st.button(
                 "Clear seed playlist",
-                use_container_width=True,
                 on_click=lambda: st.session_state.update(selected=[]),
             )
 
@@ -691,25 +588,15 @@ def main() -> None:
     )
 
     if matched:
-        st.caption(
-            f"Matched seeds: {', '.join(matched)}  ·  "
-            f"computed in {(time.time() - t0) * 1000:.0f} ms"
-        )
+        st.caption(f"Matched seeds: {', '.join(matched)}")
 
     if not results:
         st.warning("No recommendations could be generated from the current seeds.")
         return
 
-    head_l, head_r = st.columns([2, 2])
-    head_l.markdown("### Recommended Titles")
-    st.session_state.sort_by = head_r.radio(
-        "Sort by", ["Match Score", "User Rating", "Release Date"],
-        horizontal=True, label_visibility="collapsed",
-    )
-
-    if   st.session_state.sort_by == "User Rating":   results.sort(key=lambda r: r["movie"]["vote_average"],        reverse=True)
-    elif st.session_state.sort_by == "Release Date":  results.sort(key=lambda r: r["movie"]["release_date"] or "",  reverse=True)
-    else:                                              results.sort(key=lambda r: r["score"],                        reverse=True)
+    st.markdown("### Recommended Titles")
+    # Sort by match score by default
+    results.sort(key=lambda r: r["score"], reverse=True)
 
     with st.spinner("Fetching posters…"):
         prefetch_posters([r["movie"].get("tmdb_id", "") for r in results])
